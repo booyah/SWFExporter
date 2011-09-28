@@ -3,6 +3,7 @@
 	<name>SWFExporter</name>
 	<comment></comment>
 	<projects>
+		<project>as3swf</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>
