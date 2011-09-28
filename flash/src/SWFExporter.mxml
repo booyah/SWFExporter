@@ -1,0 +1,266 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:WindowedApplication xmlns:fx="http://ns.adobe.com/mxml/2009" 
+					   xmlns:s="library://ns.adobe.com/flex/spark" 
+					   xmlns:mx="library://ns.adobe.com/flex/mx" height="153" width="521"
+					   status="{statusBarText}"
+					   creationComplete="init();"
+					   invoke="handleOnInvoke(event);">
+
+	<fx:Script>
+		<![CDATA[
+			import flash.events.Event;
+			import flash.events.ProgressEvent;
+			
+			import mx.controls.ProgressBarMode;
+
+			//
+			// private member ivars			
+			//
+			[Bindable] private var statusBarText:String;
+			private var converter:SWFConverter;
+			
+			private var _options:Object;
+			private var _hasArguments:Boolean;
+			
+			private var _inputPath:File;
+			private var _outputPath:File;
+			private var _cwd:File;
+			
+			
+			private function init():void
+			{				
+				// This method called on app creation
+				statusBarText = "Ready";
+				pbarProcessing.visible = false;
+				
+				updateUI();
+			}
+			
+			//
+			// called when app is started from the command line
+			//
+			private function handleOnInvoke(event:InvokeEvent):void {				
+				
+				// default options
+				_options = { "outputPath": "." };
+				_cwd = event.currentDirectory;
+				
+				parseArgs(event.arguments.slice());
+				
+				if ( _hasArguments )
+				{	
+					run();
+				}
+			}
+			
+			private function puts(s:String):void {
+				trace(s);
+				if ( NativeProcess.isSupported )
+				{
+					var stdout:FileStream = new FileStream();
+					var sout:File = new File("/dev/fd/1");
+					stdout.open(sout, FileMode.WRITE);
+					stdout.writeUTFBytes(s);
+					stdout.close();
+				} else {
+					trace(s);
+				}
+			}
+			
+			private function printUsage():void {
+				var o:Array = new Array();
+				o.push("\nusage: SWFExtractor -o <dir> [-i <dir>] <SWF Files...>");
+				o.push("  convert SWF files to JSON format");
+				o.push("-h					print this help message");
+				o.push("-o <directory>		output dir for converted files");
+				o.push("-i <directory> 		input dir containing SWF files to convert");
+				o.push("");
+				o.push("");
+				
+				puts(o.join("\n"));
+			}
+			
+			private function parseArgs(args:Array):void {
+				if ( args.length == 0 )
+					return;
+				
+				_hasArguments = true;
+				
+				while ( args.length > 0 )
+				{
+					var arg:String = args.shift();
+					var v:String;
+					
+					if ( arg == "-h" )
+					{
+						_options["usage"] = true;
+					}
+					else if ( arg == "-i" )
+					{
+						v = args.shift();
+						_options["inputPath"] = v;
+					}
+					else if ( arg == "-o" )
+					{
+						v = args.shift();
+						_options["outputPath"] = v;
+					}
+					else
+					{
+						if ( !_options["args"] )
+						{
+							_options["args"] = new Array();
+						}
+						_options["args"].push(arg);
+					}
+				}				
+			}
+			
+			private function directorySelected(event:Event):void 
+			{
+				var directory:File = event.target as File;
+				_inputPath = directory;
+				_outputPath = _inputPath;
+				labelInputPath.text = directory.nativePath;
+				
+				converter = new SWFConverter(_inputPath, _outputPath);
+				updateUI();
+			}
+			
+			private function updateUI():void
+			{
+				btnConvert.enabled = ( converter != null );
+			}
+			
+			private function resetUI():void
+			{
+				pbarProcessing.maximum = 100;
+				pbarProcessing.minimum = 0;
+				pbarProcessing.mode = ProgressBarMode.MANUAL;
+				pbarProcessing.setProgress(0,100);
+				labelCurrentFile.text = "";
+			}
+			
+			protected function run():void
+			{				
+				if ( converter )
+				{
+					pbarProcessing.source = converter;
+					converter.export();
+					return;
+				}
+				
+				if ( _options.hasOwnProperty("usage") && _options["usage"] )
+				{
+					puts("printUsage");
+					printUsage();
+					exit();
+					return;
+				}
+				
+				if ( _options["outputPath"] )
+				{
+					_outputPath = _cwd.resolvePath(_options["outputPath"]);
+					if ( !_outputPath.exists )
+					{
+						_outputPath.createDirectory();
+					}
+				}
+				
+				if ( _options["inputPath"] )
+				{
+					_inputPath = _cwd.resolvePath(_options["inputPath"]);
+				}
+				
+				converter = new SWFConverter(_inputPath, _outputPath);
+				updateUI();
+				
+				if ( !_inputPath && _options["args"] )
+				{
+					var fileNames:Array = _options["args"];
+					var files:Array = new Array();
+					for ( var i:uint = 0; i < fileNames.length; i++ )
+					{
+						files.push(_cwd.resolvePath(fileNames[i]));
+					}
+					converter.setFiles(files);
+				}
+				
+				setupProgressBar();
+				pbarProcessing.source = converter;
+				converter.export();
+				
+				// clear options
+				_options = new Dictionary();
+			}
+			
+			protected function btnChooseSwf_clickHandler(event:MouseEvent):void
+			{					
+				var directory:File = File.documentsDirectory;
+				
+				resetUI();
+				
+				try
+				{
+					directory.browseForDirectory("Select Directory");
+					directory.addEventListener(Event.SELECT, directorySelected);
+				}
+				catch (error:Error)
+				{
+					trace("Failed:", error.message);
+				}
+				// TODO Auto-generated method stub
+			}
+
+			private function setupProgressBar():void
+			{
+				if ( _inputPath )
+				{
+					labelInputPath.text = _inputPath.nativePath;
+				}
+				
+				pbarProcessing.visible = true;
+				pbarProcessing.label = "Processing %3%%";
+				pbarProcessing.mode = ProgressBarMode.EVENT;
+				pbarProcessing.addEventListener(ProgressEvent.PROGRESS, pbarProcessing_progressHandler);
+				pbarProcessing.addEventListener(Event.COMPLETE, pbarProcessing_completeHandler);
+				
+				labelCurrentFile.text = "";
+			}
+			
+			protected function btnConvert_clickHandler(event:MouseEvent):void
+			{
+				setupProgressBar();
+				run();
+			}
+			
+			protected function pbarProcessing_progressHandler(event:ProgressEvent):void
+			{
+				if ( !converter ) return;
+				
+				labelCurrentFile.text = converter.currentFile();
+				statusBarText = "Running";
+			}
+			
+			protected function pbarProcessing_completeHandler(event:Event):void
+			{
+				pbarProcessing.removeEventListener(ProgressEvent.PROGRESS, pbarProcessing_progressHandler);
+				pbarProcessing.removeEventListener(Event.COMPLETE, pbarProcessing_completeHandler);
+				pbarProcessing.source = null;
+
+				labelCurrentFile.text = "";
+				statusBarText = "Ready";
+			}
+
+		]]>
+	</fx:Script>
+
+	<fx:Declarations>
+		<!-- Place non-visual elements (e.g., services, value objects) here -->
+	</fx:Declarations>
+	<s:Button x="16" y="18" label="Choose SWF Folder..." id="btnChooseSwf" click="btnChooseSwf_clickHandler(event)"/>
+	<s:Button x="432" y="18" label="Convert" id="btnConvert" click="btnConvert_clickHandler(event)" enabled="false"/>
+	<mx:ProgressBar x="167" width="247" id="pbarProcessing" minimum="0" labelPlacement="center" progress="pbarProcessing_progressHandler(event)" height="18" y="66" enabled="true"/>
+	<s:Label x="167" y="90" width="247" height="18" id="labelCurrentFile"/>
+	<s:Label x="167" y="21" width="247" height="37" id="labelInputPath"/>
+</s:WindowedApplication>
